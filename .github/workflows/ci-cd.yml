@@ -11,34 +11,75 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # Step 1: Checkout the code from the repository
     - name: Checkout Code
       uses: actions/checkout@v3
 
+    # Step 2: Set up Node.js environment
     - name: Set up Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '16'
 
+    # Step 3: Install dependencies
     - name: Install Dependencies
       run: npm install
 
+    # Step 4: Run tests
     - name: Run Tests
       run: npm test
 
+    # Step 5: Build Docker image
     - name: Build Docker Image
       run: docker build -t ${{ github.repository }}:$GITHUB_SHA .
 
-    - name: Push Docker Image to ACR
+    # Step 6: Log in to Azure Container Registry (ACR) and push the image
+    - name: Log in to ACR
       env:
         ACR_NAME: ${{ secrets.ACR_NAME }}
         ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
       run: |
         echo $ACR_PASSWORD | docker login $ACR_NAME.azurecr.io -u $ACR_NAME --password-stdin
+
+    - name: Push Docker Image to ACR
+      env:
+        ACR_NAME: ${{ secrets.ACR_NAME }}
+      run: |
         docker tag ${{ github.repository }}:$GITHUB_SHA $ACR_NAME.azurecr.io/${{ github.repository }}:$GITHUB_SHA
         docker push $ACR_NAME.azurecr.io/${{ github.repository }}:$GITHUB_SHA
 
-    - name: Deploy to Kubernetes
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    # Step 1: Set up Kubernetes credentials
+    - name: Set up Kubeconfig
       env:
         KUBECONFIG: ${{ secrets.KUBECONFIG }}
+      run: echo "$KUBECONFIG" > ~/.kube/config
+
+    # Step 2: Deploy the application to Kubernetes
+    - name: Deploy to Kubernetes
       run: |
         kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+
+    # Step 3: Monitor the deployment status
+    - name: Monitor Deployment
+      run: |
+        kubectl rollout status deployment/nodejs-webapp --timeout=60s
+        kubectl get pods --namespace=default --watch
+
+    # Step 4: Rollback deployment if it fails
+    - name: Rollback Deployment on Failure
+      if: failure()
+      run: |
+        echo "Deployment failed. Rolling back..."
+        kubectl rollout undo deployment/nodejs-webapp
+
+    # Step 5: Fetch logs if deployment fails
+    - name: Fetch Logs from Pods
+      if: failure()
+      run: |
+        POD_NAME=$(kubectl get pods -l app=nodejs-webapp -o jsonpath='{.items[0].metadata.name}')
+        kubectl logs $POD_NAME
