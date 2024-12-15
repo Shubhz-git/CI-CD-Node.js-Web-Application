@@ -1,0 +1,44 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+
+    - name: Install Dependencies
+      run: npm install
+
+    - name: Run Tests
+      run: npm test
+
+    - name: Build Docker Image
+      run: docker build -t ${{ github.repository }}:$GITHUB_SHA .
+
+    - name: Push Docker Image to ACR
+      env:
+        ACR_NAME: ${{ secrets.ACR_NAME }}
+        ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+      run: |
+        echo $ACR_PASSWORD | docker login $ACR_NAME.azurecr.io -u $ACR_NAME --password-stdin
+        docker tag ${{ github.repository }}:$GITHUB_SHA $ACR_NAME.azurecr.io/${{ github.repository }}:$GITHUB_SHA
+        docker push $ACR_NAME.azurecr.io/${{ github.repository }}:$GITHUB_SHA
+
+    - name: Deploy to Kubernetes
+      env:
+        KUBECONFIG: ${{ secrets.KUBECONFIG }}
+      run: |
+        kubectl apply -f k8s/deployment.yaml
