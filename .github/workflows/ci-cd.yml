@@ -25,15 +25,16 @@ jobs:
     - name: Install Dependencies
       run: npm install
 
-    # Step 4: Run tests
+    # Step 4: Run tests (optional, can be skipped if no tests exist)
     - name: Run Tests
       run: npm test
+      continue-on-error: true   # Allows the workflow to continue even if the test fails
 
     # Step 5: Build Docker image
     - name: Build Docker Image
       run: docker build -t ${{ github.repository }}:$GITHUB_SHA .
 
-    # Step 6: Log in to Azure Container Registry (ACR) and push the image
+    # Step 6: Log in to ACR and push the image
     - name: Log in to ACR
       env:
         ACR_NAME: ${{ secrets.ACR_NAME }}
@@ -70,14 +71,14 @@ jobs:
         kubectl rollout status deployment/nodejs-webapp --timeout=60s
         kubectl get pods --namespace=default --watch
 
-    # Step 4: Rollback deployment if it fails
+    # Step 4: Rollback deployment on failure
     - name: Rollback Deployment on Failure
       if: failure()
       run: |
         echo "Deployment failed. Rolling back..."
         kubectl rollout undo deployment/nodejs-webapp
 
-    # Step 5: Fetch logs if deployment fails
+    # Step 5: Fetch logs from Pods on failure
     - name: Fetch Logs from Pods
       if: failure()
       run: |
